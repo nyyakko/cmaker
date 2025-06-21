@@ -1,0 +1,46 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+    "configurePresets": [
+        {
+            "name": "base",
+            "displayName": "x64 base",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build",
+            "architecture": { "value": "x64", "strategy": "external" },
+            "cacheVariables": {
+                "EXPORT_DIR": "${sourceDir}/build/cmake",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "${sourceDir}/build/${presetName}",
+                %IF [<|ENV:LANGUAGE|> EQUALS <c++>]:
+                "!PROJECT!_CompilerOptions": "-Werror;-Wall;-Wextra;-Wshadow;-Wnon-virtual-dtor;-Wold-style-cast;-Wcast-align;-Wunused;-Woverloaded-virtual;-Wpedantic;-Wconversion;-Wsign-conversion;-Wnull-dereference;-Wdouble-promotion;-Wimplicit-fallthrough"
+                %ELSE:
+                "!PROJECT!_CompilerOptions": "-Werror;-Wall;-Wextra;-Wshadow;-Wcast-align;-Wunused;-Wpedantic;-Wconversion;-Wsign-conversion;-Wnull-dereference;-Wdouble-promotion;-Wimplicit-fallthrough"
+                %END
+            }
+        },
+        {
+            "name": "debug",
+            "inherits": [ "base" ],
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "ENABLE_CLANGTIDY": true,
+                %IF [<|ENV:FEATURES|> CONTAINS <testable>]:
+                "ENABLE_CPPCHECK": true,
+                "ENABLE_TESTING": true
+                %ELSE:
+                "ENABLE_CPPCHECK": true
+                %END
+            }
+        },
+        {
+            "name": "release",
+            "inherits": [ "base" ],
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "ENABLE_CLANGTIDY": false,
+                "ENABLE_CPPCHECK": false
+            }
+        }]
+}
+

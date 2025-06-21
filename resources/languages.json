@@ -1,0 +1,100 @@
+{
+    "languages": [
+        {
+            "name": "c++",
+            "standards": [23, 20, 17, 14, 11],
+            "templates": [
+                {
+                    "name": "executable",
+                    "kinds": [
+                        {
+                            "name": "common",
+                            "features": [
+                                {
+                                    "name": "installable",
+                                    "optional": true
+                                }
+                            ]
+                        },
+                        {
+                            "name": "imgui",
+                            "inherits": ["common"]
+                        }
+                    ]
+                },
+                {
+                    "name": "library",
+                    "kinds": [
+                        {
+                            "name": "common",
+                            "features": [
+                                {
+                                    "name": "installable",
+                                    "optional": true
+                                }
+                            ]
+                        },
+                        {
+                            "name": "static",
+                            "inherits": ["common"]
+                        },
+                        {
+                            "name": "shared",
+                            "inherits": ["common"]
+                        },
+                        {
+                            "name": "header-only",
+                            "inherits": ["common"]
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "c",
+            "standards": [23, 17, 11, 98],
+            "templates": [
+                {
+                    "name": "executable",
+                    "kinds": [
+                        {
+                            "name": "common",
+                            "features": [
+                                {
+                                    "name": "installable",
+                                    "optional": true
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "name": "library",
+                    "kinds": [
+                        {
+                            "name": "common",
+                            "features": [
+                                {
+                                    "name": "installable",
+                                    "optional": true
+                                }
+                            ]
+                        },
+                        {
+                            "name": "static",
+                            "inherits": ["common"]
+                        },
+                        {
+                            "name": "shared",
+                            "inherits": ["common"]
+                        },
+                        {
+                            "name": "header-only",
+                            "inherits": ["common"]
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}
