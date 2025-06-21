@@ -30,6 +30,10 @@
                             "features": [
                                 {
                                     "name": "installable",
+                                    "optional": false
+                                },
+                                {
+                                    "name": "testable",
                                     "optional": true
                                 }
                             ]
@@ -76,6 +80,10 @@
                             "features": [
                                 {
                                     "name": "installable",
+                                    "optional": false
+                                },
+                                {
+                                    "name": "testable",
                                     "optional": true
                                 }
                             ]

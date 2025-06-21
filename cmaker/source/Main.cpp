@@ -1,6 +1,7 @@
 #include "Environment.hpp"
 
 #include <argparse/argparse.hpp>
+#include <fplus/container_common.hpp>
 #include <fplus/fplus.hpp>
 #include <liberror/Result.hpp>
 #include <liberror/Try.hpp>
@@ -9,6 +10,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <numeric>
 #include <optional>
 #include <span>
 #include <sstream>
@@ -157,7 +159,7 @@ liberror::Result<void> recursive_copy_features(Configuration const& configuratio
     return {};
 }
 
-liberror::Result<void> create_project_structure(Configuration const& configuration, std::vector<Language> const& languages)
+liberror::Result<void> create_project_structure(Configuration const& configuration, Template const& projectTemplate, Kind const& projectKind)
 {
     namespace fs = std::filesystem;
 
@@ -166,28 +168,17 @@ liberror::Result<void> create_project_structure(Configuration const& configurati
         return liberror::make_error("Project \"{}\" already exists.", configuration.name);
     }
 
-    auto projectLanguage = *std::ranges::find(languages, configuration.language, &Language::name);
-    auto projectTemplate = *std::ranges::find(projectLanguage.templates, configuration.type, &Template::name);
-    auto projectKind = *std::ranges::find(projectTemplate.kinds, configuration.kind, &Kind::name);
-
     if (projectKind.inherits.has_value())
     {
         for (auto const& inherited : *projectKind.inherits)
         {
             TRY(recursive_copy(get_application_data_path() / "templates" / configuration.type / inherited, configuration.name));
+            auto parent = *std::ranges::find(projectTemplate.kinds, inherited, &Kind::name);
+            TRY(recursive_copy_features(configuration, *parent.features));
         }
     }
 
     TRY(recursive_copy(get_application_data_path() / "templates" / configuration.type / configuration.kind, configuration.name));
-
-    if (projectKind.inherits.has_value())
-    {
-        for (auto const& kind : *projectKind.inherits)
-        {
-            auto parentKind = *std::ranges::find(projectTemplate.kinds, kind, &Kind::name);
-            TRY(recursive_copy_features(configuration, *parentKind.features));
-        }
-    }
 
     if (projectKind.features.has_value())
     {
@@ -221,16 +212,10 @@ void replace_filename_wildcards(std::filesystem::path const& path, std::unordere
 
     for (auto const& entry : fs::directory_iterator(path) | std::views::transform(&fs::directory_entry::path))
     {
-        if (fs::is_directory(entry))
-        {
-            replace_filename_wildcards(entry, wildcards);
-        }
-
-        auto fnKeepWildcardIfPresent = std::views::filter([&](auto&& wildcard) {
+        if (fs::is_directory(entry)) replace_filename_wildcards(entry, wildcards);
+        std::ranges::for_each(wildcards | std::views::filter([&](auto&& wildcard) {
             return entry.filename().string().contains(wildcard.first);
-        });
-
-        std::ranges::for_each(wildcards | fnKeepWildcardIfPresent, std::bind_front(fnRename, entry));
+        }), std::bind_front(fnRename, entry));
     }
 }
 
@@ -245,17 +230,14 @@ void replace_file_wildcards(std::filesystem::path const& path, std::unordered_ma
         outputStream << replace(contentStream.str(), wildcard);
     };
 
-    auto fnFilterRegularFile = std::views::filter([](auto&& entry) {
-        return fs::is_regular_file(entry);
-    });
-
-    for (auto const& entry : fs::recursive_directory_iterator(path) | std::views::transform(&fs::directory_entry::path) | fnFilterRegularFile)
+    for (auto const& entry : fs::recursive_directory_iterator(path) | std::views::transform(&fs::directory_entry::path))
     {
+        if (!fs::is_regular_file(entry)) continue;
         std::ranges::for_each(wildcards, std::bind_front(fnReplace, entry));
     }
 }
 
-liberror::Result<void> preprocess_project_files(Configuration const& configuration)
+liberror::Result<void> preprocess_project_files(Configuration const& configuration, Template const& projectTemplate, Kind const& projectKind)
 {
     using namespace std::literals;
     namespace fs = std::filesystem;
@@ -266,15 +248,28 @@ liberror::Result<void> preprocess_project_files(Configuration const& configurati
             { "ENV:STANDARD", configuration.standard },
             { "ENV:KIND", configuration.type },
             { "ENV:MODE", configuration.kind },
-            { "ENV:FEATURES", fplus::join(","s, configuration.features) },
+            {
+                "ENV:FEATURES", [&] () {
+                    auto features = configuration.features;
+                    auto inheritedFeatures = fplus::transform([&] (std::string const& inherited) {
+                        Kind const& parent = *std::ranges::find(projectTemplate.kinds, inherited, &Kind::name);
+                        return fplus::join(","s,
+                            fplus::transform(std::bind_front(&Feature::name), fplus::drop_if(std::bind_front(&Feature::optional), *parent.features))
+                        );
+                    }, *projectKind.inherits);
+                    inheritedFeatures = fplus::drop_if([&] (auto&& feature) { return fplus::is_elem_of(feature, features); }, inheritedFeatures);
+                    features.insert(features.end(), inheritedFeatures.begin(), inheritedFeatures.end());
+                    return fplus::join(","s, features);
+                }()
+            }
         }
     };
 
-    auto fnFilterRegularFile = std::views::filter([](auto&& entry) { return fs::is_regular_file(entry); });
-    for (auto const& entry : fs::recursive_directory_iterator(configuration.name) | fnFilterRegularFile)
+    for (auto const& entry : fs::recursive_directory_iterator(configuration.name) | std::views::transform(&fs::directory_entry::path))
     {
-        auto const content = TRY(libpreprocessor::process(entry.path(), context));
-        std::ofstream outputStream(entry.path());
+        if (!fs::is_regular_file(entry)) continue;
+        auto const content = TRY(libpreprocessor::process(entry, context));
+        std::ofstream outputStream(entry);
         outputStream << content;
     }
 
@@ -292,8 +287,12 @@ liberror::Result<void> preprocess_project_files(Configuration const& configurati
 
 liberror::Result<void> create_project(Configuration const& configuration, std::vector<Language> const& languages)
 {
-    TRY(create_project_structure(configuration, languages));
-    TRY(preprocess_project_files(configuration));
+    auto projectLanguage = *std::ranges::find(languages, configuration.language, &Language::name);
+    auto projectTemplate = *std::ranges::find(projectLanguage.templates, configuration.type, &Template::name);
+    auto projectKind = *std::ranges::find(projectTemplate.kinds, configuration.kind, &Kind::name);
+
+    TRY(create_project_structure(configuration, projectTemplate, projectKind));
+    TRY(preprocess_project_files(configuration, projectTemplate, projectKind));
     return {};
 }
 
