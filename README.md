@@ -1,6 +1,6 @@
-# cmaker
+# Cmaker
 
-project to create c++ and c projects.
+project to create cmake projects for c++ and c.
 
 ## Building
 
