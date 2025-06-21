@@ -104,9 +104,11 @@ struct Configuration
     std::vector<std::string> features;
 };
 
-Configuration configure_project(argparse::ArgumentParser const& parser)
+Configuration configure_project(argparse::ArgumentParser const& parser, std::vector<Language> const& languages)
 {
-    return Configuration {
+    using namespace std::literals;
+
+    Configuration configuration {
         .name = parser.get<std::string>("--name"),
         .language = parser.get<std::string>("--lang"),
         .standard = [&] () {
@@ -118,6 +120,24 @@ Configuration configure_project(argparse::ArgumentParser const& parser)
         .kind = parser.get<std::string>("--kind"),
         .features = parser.get<std::vector<std::string>>("--features")
     };
+
+    auto projectLanguage = *std::ranges::find(languages, configuration.language, &Language::name);
+    auto projectTemplate = *std::ranges::find(projectLanguage.templates, configuration.type, &Template::name);
+    auto projectKind = *std::ranges::find(projectTemplate.kinds, configuration.kind, &Kind::name);
+
+    if (projectKind.inherits.has_value())
+    {
+        auto inheritedFeatures = fplus::transform([&] (std::string const& inherited) {
+            Kind const& parent = *std::ranges::find(projectTemplate.kinds, inherited, &Kind::name);
+            return fplus::join(","s,
+                fplus::transform(std::bind_front(&Feature::name), fplus::drop_if(std::bind_front(&Feature::optional), *parent.features))
+            );
+        }, *projectKind.inherits);
+        inheritedFeatures = fplus::drop_if([&] (auto&& feature) { return fplus::is_elem_of(feature, configuration.features); }, inheritedFeatures);
+        configuration.features.insert(configuration.features.end(), inheritedFeatures.begin(), inheritedFeatures.end());
+    }
+
+    return configuration;
 }
 
 liberror::Result<bool> recursive_copy(std::filesystem::path const& source, std::filesystem::path const& destination)
@@ -236,10 +256,10 @@ void replace_file_wildcards(std::filesystem::path const& path, std::unordered_ma
     }
 }
 
-liberror::Result<void> preprocess_project_files(Configuration const& configuration, Template const& projectTemplate, Kind const& projectKind)
+liberror::Result<void> preprocess_project_files(Configuration const& configuration)
 {
-    using namespace std::literals;
     namespace fs = std::filesystem;
+    using namespace std::literals;
 
     libpreprocessor::PreprocessorContext context {
         .environmentVariables = {
@@ -247,25 +267,7 @@ liberror::Result<void> preprocess_project_files(Configuration const& configurati
             { "ENV:STANDARD", configuration.standard },
             { "ENV:KIND", configuration.type },
             { "ENV:MODE", configuration.kind },
-            {
-                "ENV:FEATURES", [&] () {
-                    auto features = configuration.features;
-
-                    if (projectKind.inherits.has_value())
-                    {
-                        auto inheritedFeatures = fplus::transform([&] (std::string const& inherited) {
-                            Kind const& parent = *std::ranges::find(projectTemplate.kinds, inherited, &Kind::name);
-                            return fplus::join(","s,
-                                fplus::transform(std::bind_front(&Feature::name), fplus::drop_if(std::bind_front(&Feature::optional), *parent.features))
-                            );
-                        }, *projectKind.inherits);
-                        inheritedFeatures = fplus::drop_if([&] (auto&& feature) { return fplus::is_elem_of(feature, features); }, inheritedFeatures);
-                        features.insert(features.end(), inheritedFeatures.begin(), inheritedFeatures.end());
-                    }
-
-                    return fplus::join(","s, features);
-                }()
-            }
+            { "ENV:FEATURES", fplus::join(","s, configuration.features) }
         }
     };
 
@@ -296,7 +298,8 @@ liberror::Result<void> create_project(Configuration const& configuration, std::v
     auto projectKind = *std::ranges::find(projectTemplate.kinds, configuration.kind, &Kind::name);
 
     TRY(create_project_structure(configuration, projectTemplate, projectKind));
-    TRY(preprocess_project_files(configuration, projectTemplate, projectKind));
+    TRY(preprocess_project_files(configuration));
+
     return {};
 }
 
@@ -327,7 +330,7 @@ liberror::Result<void> safe_main(std::span<char const*> arguments)
     std::ranges::copy(languagesJson["languages"], std::back_inserter(languages));
 
     TRY(sanitize_argument_values(parser, languages));
-    auto configuration = configure_project(parser);
+    auto configuration = configure_project(parser, languages);
     TRY(create_project(configuration, languages));
 
     return {};
