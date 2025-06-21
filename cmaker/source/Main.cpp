@@ -251,14 +251,19 @@ liberror::Result<void> preprocess_project_files(Configuration const& configurati
             {
                 "ENV:FEATURES", [&] () {
                     auto features = configuration.features;
-                    auto inheritedFeatures = fplus::transform([&] (std::string const& inherited) {
-                        Kind const& parent = *std::ranges::find(projectTemplate.kinds, inherited, &Kind::name);
-                        return fplus::join(","s,
-                            fplus::transform(std::bind_front(&Feature::name), fplus::drop_if(std::bind_front(&Feature::optional), *parent.features))
-                        );
-                    }, *projectKind.inherits);
-                    inheritedFeatures = fplus::drop_if([&] (auto&& feature) { return fplus::is_elem_of(feature, features); }, inheritedFeatures);
-                    features.insert(features.end(), inheritedFeatures.begin(), inheritedFeatures.end());
+
+                    if (projectKind.inherits.has_value())
+                    {
+                        auto inheritedFeatures = fplus::transform([&] (std::string const& inherited) {
+                            Kind const& parent = *std::ranges::find(projectTemplate.kinds, inherited, &Kind::name);
+                            return fplus::join(","s,
+                                fplus::transform(std::bind_front(&Feature::name), fplus::drop_if(std::bind_front(&Feature::optional), *parent.features))
+                            );
+                        }, *projectKind.inherits);
+                        inheritedFeatures = fplus::drop_if([&] (auto&& feature) { return fplus::is_elem_of(feature, features); }, inheritedFeatures);
+                        features.insert(features.end(), inheritedFeatures.begin(), inheritedFeatures.end());
+                    }
+
                     return fplus::join(","s, features);
                 }()
             }
