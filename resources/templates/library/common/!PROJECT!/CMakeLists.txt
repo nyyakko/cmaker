@@ -33,7 +33,7 @@ target_include_directories(${PROJECT_NAME}
 %IF [NOT [<|ENV:MODE|> EQUALS <header-only>]]:
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}"
 %END
-%IF [<|ENV:FEATURES|> CONTAINS <installable>]:
+%IF [[<|ENV:MODE|> EQUALS <header-only>] OR [<|ENV:FEATURES|> CONTAINS <installable>]]:
     INTERFACE
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
         "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
