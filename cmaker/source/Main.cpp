@@ -10,7 +10,6 @@
 
 #include <algorithm>
 #include <fstream>
-#include <numeric>
 #include <optional>
 #include <span>
 #include <sstream>
