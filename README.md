@@ -1,4 +1,4 @@
-# Cmaker
+# CMaker
 
 project to create cmake projects for c++ and c.
 
