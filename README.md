@@ -17,3 +17,7 @@ py install.py
 ```
 
 to install.
+
+## Documentation
+
+For usage documentation, read the docs available at the [[documentation]] folder.
