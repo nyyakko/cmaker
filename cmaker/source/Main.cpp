@@ -137,6 +137,13 @@ Configuration configure_project(argparse::ArgumentParser const& parser, std::vec
         configuration.features.insert(configuration.features.end(), inheritedFeatures.begin(), inheritedFeatures.end());
     }
 
+    if (projectKind.features.has_value())
+    {
+        auto features = fplus::transform(std::bind_front(&Feature::name), fplus::drop_if(std::bind_front(&Feature::optional), *projectKind.features));
+        features = fplus::drop_if([&] (auto&& feature) { return fplus::is_elem_of(feature, configuration.features); }, features);
+        configuration.features.insert(configuration.features.end(), features.begin(), features.end());
+    }
+
     return configuration;
 }
 
