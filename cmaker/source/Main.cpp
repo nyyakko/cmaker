@@ -312,7 +312,7 @@ liberror::Result<void> create_project(Configuration const& configuration, std::v
 
 liberror::Result<void> safe_main(std::span<char const*> arguments)
 {
-    argparse::ArgumentParser parser(PROJECT_NAME);
+    argparse::ArgumentParser parser(PROJECT_NAME, "", argparse::default_arguments::help);
 
     parser.add_description("Create C++ and C projects.");
 
