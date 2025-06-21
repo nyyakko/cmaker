@@ -31,6 +31,18 @@ install(TARGETS     ${PROJECT_NAME}
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
+install(FILES       ${CMAKE_SOURCE_DIR}/resources/languages.json
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}
+)
+
+install(DIRECTORY   ${CMAKE_SOURCE_DIR}/resources/templates
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}
+)
+
+install(DIRECTORY   ${CMAKE_SOURCE_DIR}/resources/features
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}
+)
+
 target_link_options(${PROJECT_NAME} PRIVATE ${cmaker_LinkerOptions})
 target_compile_options(${PROJECT_NAME} PRIVATE ${cmaker_CompilerOptions})
 target_link_libraries(${PROJECT_NAME} PRIVATE ${cmaker_ExternalLibraries})
