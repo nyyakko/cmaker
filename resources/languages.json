@@ -15,9 +15,9 @@
                                     "optional": true
                                 },
                                 {
-                                    "name": "metadata",
+                                    "name": "freedesktop-metadata",
                                     "optional": true,
-                                    "requiredFeatures": ["installable"]
+                                    "requires": ["installable"]
                                 }
                             ]
                         },

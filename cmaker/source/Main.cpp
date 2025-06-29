@@ -19,20 +19,20 @@ struct Feature
 {
     std::string name;
     bool optional;
-    std::optional<std::vector<std::string>> requiredFeatures;
+    std::optional<std::vector<std::string>> requirez;
 
     friend void to_json(nlohmann::json& json, Feature const& type)
     {
         json["name"] = type.name;
         json["optional"] = type.optional;
-        if (type.requiredFeatures.has_value()) json["requiredFeatures"] = *type.requiredFeatures;
+        if (type.requirez.has_value()) json["requires"] = *type.requirez;
     }
 
     friend void from_json(nlohmann::json const& json, Feature& type)
     {
         json.at("name").get_to(type.name);
         json.at("optional").get_to(type.optional);
-        if (json.count("requiredFeatures")) type.requiredFeatures = json.at("requiredFeatures").get<std::vector<std::string>>();
+        if (json.count("requires")) type.requirez = json.at("requires").get<std::vector<std::string>>();
     }
 };
 
@@ -164,36 +164,36 @@ Configuration configure_project(argparse::ArgumentParser const& parser, std::vec
     auto projectKind = *std::ranges::find(projectTemplate.kinds, configuration.kind, &Kind::name);
 
     auto fnCollectFeatureRequiredFeatures = [] (auto&& kind, auto&& featureName) {
-        std::vector<std::string> requiredFeatures {};
-        if (!kind.features.has_value()) return requiredFeatures;
+        std::vector<std::string> requirez {};
+        if (!kind.features.has_value()) return requirez;
 
         auto maybeFeature = std::ranges::find(*kind.features, featureName, &Feature::name);
-        if (maybeFeature != kind.features->end() && maybeFeature->requiredFeatures.has_value())
+        if (maybeFeature != kind.features->end() && maybeFeature->requirez.has_value())
         {
-            std::ranges::copy(*maybeFeature->requiredFeatures, std::back_inserter(requiredFeatures));
+            std::ranges::copy(*maybeFeature->requirez, std::back_inserter(requirez));
         }
 
-        return requiredFeatures;
+        return requirez;
     };
 
     auto fnCollectFeatureRequiredFeaturesRecursive = [&] (this auto&& self, auto&& kinds, auto&& kind, auto&& featureName) {
-        auto requiredFeatures = fnCollectFeatureRequiredFeatures(kind, featureName);
-        if (!kind.inherits.has_value()) return requiredFeatures;
+        auto requirez = fnCollectFeatureRequiredFeatures(kind, featureName);
+        if (!kind.inherits.has_value()) return requirez;
 
         for (auto const& inheritName : *kind.inherits)
         {
             auto const& inheritKind = *std::ranges::find(kinds, inheritName, &Kind::name);
-            std::ranges::copy(self(kinds, inheritKind, featureName), std::back_inserter(requiredFeatures));
+            std::ranges::copy(self(kinds, inheritKind, featureName), std::back_inserter(requirez));
         }
 
-        return requiredFeatures;
+        return requirez;
     };
 
     configuration.features = fplus::nub(fplus::transform_and_concat([&] (auto&& featureName) -> std::vector<std::string> {
-        std::vector<std::string> requiredFeatures {};
-        std::ranges::copy(fnCollectFeatureRequiredFeaturesRecursive(projectTemplate.kinds, projectKind, featureName), std::back_inserter(requiredFeatures));
-        requiredFeatures.push_back(featureName);
-        return requiredFeatures;
+        std::vector<std::string> requirez {};
+        std::ranges::copy(fnCollectFeatureRequiredFeaturesRecursive(projectTemplate.kinds, projectKind, featureName), std::back_inserter(requirez));
+        requirez.push_back(featureName);
+        return requirez;
     }, configuration.features));
 
     auto fnCollectFeatures = [] (auto&& kind) {
@@ -202,9 +202,9 @@ Configuration configure_project(argparse::ArgumentParser const& parser, std::vec
 
         for (auto const& feature : fplus::drop_if(std::bind_front(&Feature::optional), *kind.features))
         {
-            if (feature.requiredFeatures.has_value())
+            if (feature.requirez.has_value())
             {
-                std::ranges::copy(*feature.requiredFeatures, std::back_inserter(features));
+                std::ranges::copy(*feature.requirez, std::back_inserter(features));
             }
 
             features.push_back(feature.name);
