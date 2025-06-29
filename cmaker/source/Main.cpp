@@ -8,6 +8,7 @@
 #include <libpreprocessor/Processor.hpp>
 #include <nlohmann/json.hpp>
 
+#include <functional>
 #include <algorithm>
 #include <fstream>
 #include <optional>
@@ -18,8 +19,21 @@ struct Feature
 {
     std::string name;
     bool optional;
+    std::optional<std::vector<std::string>> requiredFeatures;
 
-    NLOHMANN_DEFINE_TYPE_INTRUSIVE(Feature, name, optional);
+    friend void to_json(nlohmann::json& json, Feature const& type)
+    {
+        json["name"] = type.name;
+        json["optional"] = type.optional;
+        if (type.requiredFeatures.has_value()) json["requiredFeatures"] = *type.requiredFeatures;
+    }
+
+    friend void from_json(nlohmann::json const& json, Feature& type)
+    {
+        json.at("name").get_to(type.name);
+        json.at("optional").get_to(type.optional);
+        if (json.count("requiredFeatures")) type.requiredFeatures = json.at("requiredFeatures").get<std::vector<std::string>>();
+    }
 };
 
 struct Kind
@@ -85,11 +99,35 @@ liberror::Result<void> sanitize_argument_values(argparse::ArgumentParser const& 
         return liberror::make_error("Kind \"{}\" is not avaiable for template \"{}\"", parser.get<std::string>("--kind"), parser.get<std::string>("type"));
     }
 
-    std::ranges::all_of(parser.get<std::vector<std::string>>("--features"), [&] (std::string const& feature) {
-        return
-            !maybeTemplateKind->features ||
-            std::ranges::find(*maybeTemplateKind->features, feature, &Feature::name) != (*maybeTemplateKind->features).end();
+    auto features = parser.get<std::vector<std::string>>("--features");
+    auto maybeFeature = std::ranges::find_if(features, [&] (std::string const& featureName) {
+        auto fnIsPresent = [&] {
+            return fplus::is_elem_of(featureName, fplus::transform(std::bind_front(&Feature::name), *maybeTemplateKind->features));
+        };
+
+        return (!maybeTemplateKind->features.has_value() || !fnIsPresent()) && ![&] (this auto&& self, Kind const& kind) -> bool {
+            if (!kind.inherits.has_value()) return false;
+
+            auto isPresent = false;
+
+            for (auto const& inheritName : *kind.inherits)
+            {
+                if (isPresent) break;
+
+                auto const& inherit = *std::ranges::find(maybeTemplate->kinds, inheritName, &Kind::name);
+                if (inherit.features.has_value())
+                    isPresent |= fplus::is_elem_of(featureName, fplus::transform(std::bind_front(&Feature::name), *inherit.features));
+                if (inherit.inherits.has_value())
+                    isPresent |= self(inherit);
+            }
+
+            return isPresent;
+        }(*maybeTemplateKind);
     });
+    if (maybeFeature != features.end())
+    {
+        return liberror::make_error("Feature \"{}\" is not available for template of kind \"{}\"", *maybeFeature, parser.get<std::string>("--kind"));
+    }
 
     return {};
 }
@@ -125,29 +163,91 @@ Configuration configure_project(argparse::ArgumentParser const& parser, std::vec
     auto projectTemplate = *std::ranges::find(projectLanguage.templates, configuration.type, &Template::name);
     auto projectKind = *std::ranges::find(projectTemplate.kinds, configuration.kind, &Kind::name);
 
-    if (projectKind.inherits.has_value())
-    {
-        auto inheritedFeatures = fplus::transform([&] (std::string const& inherited) {
-            Kind const& parent = *std::ranges::find(projectTemplate.kinds, inherited, &Kind::name);
-            return fplus::join(","s,
-                fplus::transform(std::bind_front(&Feature::name), fplus::drop_if(std::bind_front(&Feature::optional), *parent.features))
-            );
-        }, *projectKind.inherits);
-        inheritedFeatures = fplus::drop_if([&] (auto&& feature) { return fplus::is_elem_of(feature, configuration.features); }, inheritedFeatures);
-        configuration.features.insert(configuration.features.end(), inheritedFeatures.begin(), inheritedFeatures.end());
-    }
+    auto fnCollectFeatureRequiredFeatures = [] (auto&& kind, auto&& featureName) {
+        std::vector<std::string> requiredFeatures {};
+        if (!kind.features.has_value()) return requiredFeatures;
+
+        auto maybeFeature = std::ranges::find(*kind.features, featureName, &Feature::name);
+        if (maybeFeature != kind.features->end() && maybeFeature->requiredFeatures.has_value())
+        {
+            std::ranges::copy(*maybeFeature->requiredFeatures, std::back_inserter(requiredFeatures));
+        }
+
+        return requiredFeatures;
+    };
+
+    auto fnCollectFeatureRequiredFeaturesRecursive = [&] (this auto&& self, auto&& kinds, auto&& kind, auto&& featureName) {
+        auto requiredFeatures = fnCollectFeatureRequiredFeatures(kind, featureName);
+        if (!kind.inherits.has_value()) return requiredFeatures;
+
+        for (auto const& inheritName : *kind.inherits)
+        {
+            auto const& inheritKind = *std::ranges::find(kinds, inheritName, &Kind::name);
+            std::ranges::copy(self(kinds, inheritKind, featureName), std::back_inserter(requiredFeatures));
+        }
+
+        return requiredFeatures;
+    };
+
+    configuration.features = fplus::nub(fplus::transform_and_concat([&] (auto&& featureName) -> std::vector<std::string> {
+        std::vector<std::string> requiredFeatures {};
+        std::ranges::copy(fnCollectFeatureRequiredFeaturesRecursive(projectTemplate.kinds, projectKind, featureName), std::back_inserter(requiredFeatures));
+        requiredFeatures.push_back(featureName);
+        return requiredFeatures;
+    }, configuration.features));
+
+    auto fnCollectFeatures = [] (auto&& kind) {
+        std::vector<std::string> features {};
+        if (!kind.features.has_value()) return features;
+
+        for (auto const& feature : fplus::drop_if(std::bind_front(&Feature::optional), *kind.features))
+        {
+            if (feature.requiredFeatures.has_value())
+            {
+                std::ranges::copy(*feature.requiredFeatures, std::back_inserter(features));
+            }
+
+            features.push_back(feature.name);
+        }
+
+        return features;
+    };
+
+    auto fnCollectFeaturesRecursive = [&] (this auto&& self, auto&& kinds, auto&& kind) {
+        auto features = fnCollectFeatures(kind);
+        if (!kind.inherits.has_value()) return features;
+
+        for (auto const& subInheritedName : *kind.inherits)
+        {
+            auto const& subInherited = *std::ranges::find(kinds, subInheritedName, &Kind::name);
+            std::ranges::copy(self(kinds, subInherited), std::back_inserter(features));
+        }
+
+        return features;
+    };
 
     if (projectKind.features.has_value())
     {
-        auto features = fplus::transform(std::bind_front(&Feature::name), fplus::drop_if(std::bind_front(&Feature::optional), *projectKind.features));
+        auto features = fplus::nub(fnCollectFeatures(projectKind));
         features = fplus::drop_if([&] (auto&& feature) { return fplus::is_elem_of(feature, configuration.features); }, features);
         configuration.features.insert(configuration.features.end(), features.begin(), features.end());
+    }
+
+    if (projectKind.inherits.has_value())
+    {
+        auto inheritedFeatures = fplus::nub(fplus::transform_and_concat([&] (std::string const& inheritedName) {
+            Kind const& inherited = *std::ranges::find(projectTemplate.kinds, inheritedName, &Kind::name);
+            return fnCollectFeaturesRecursive(projectTemplate.kinds, inherited);
+        }, *projectKind.inherits));
+
+        inheritedFeatures = fplus::drop_if([&] (auto&& feature) { return fplus::is_elem_of(feature, configuration.features); }, inheritedFeatures);
+        configuration.features.insert(configuration.features.end(), inheritedFeatures.begin(), inheritedFeatures.end());
     }
 
     return configuration;
 }
 
-liberror::Result<bool> recursive_copy(std::filesystem::path const& source, std::filesystem::path const& destination)
+liberror::Result<bool> copy_files(std::filesystem::path const& source, std::filesystem::path const& destination)
 {
     namespace fs = std::filesystem;
 
@@ -165,21 +265,16 @@ liberror::Result<bool> recursive_copy(std::filesystem::path const& source, std::
     return true;
 }
 
-liberror::Result<void> recursive_copy_features(Configuration const& configuration, std::vector<Feature> const& features)
+liberror::Result<void> copy_feature_files(Configuration const& configuration, Feature const& feature)
 {
     namespace fs = std::filesystem;
 
-    for (auto const& feature : features)
+    auto isRequired = !feature.optional;
+    auto isPresent = std::ranges::find(configuration.features, feature.name) != configuration.features.end();
+    if (isRequired || isPresent)
     {
-        auto isRequired = !feature.optional;
-        auto isPresent = std::ranges::find(configuration.features, feature.name) != configuration.features.end();
-        if (isRequired || isPresent)
-        {
-            if (fs::exists(get_application_data_path() / "features" / feature.name))
-                TRY(recursive_copy(get_application_data_path() / "features" / feature.name, configuration.name));
-            else
-                return liberror::make_error("Could not find feature \"{}\".", feature.name);
-        }
+        if (fs::exists(get_application_data_path() / "features" / feature.name))
+            TRY(copy_files(get_application_data_path() / "features" / feature.name, configuration.name));
     }
 
     return {};
@@ -194,21 +289,33 @@ liberror::Result<void> create_project_structure(Configuration const& configurati
         return liberror::make_error("Project \"{}\" already exists.", configuration.name);
     }
 
-    if (projectKind.inherits.has_value())
-    {
-        for (auto const& inherited : *projectKind.inherits)
-        {
-            TRY(recursive_copy(get_application_data_path() / "templates" / configuration.type / inherited, configuration.name));
-            auto parent = *std::ranges::find(projectTemplate.kinds, inherited, &Kind::name);
-            TRY(recursive_copy_features(configuration, *parent.features));
-        }
-    }
+    TRY([&] (this auto&& self, auto&& kind) -> liberror::Result<void> {
+        if (!kind.inherits.has_value()) return {};
 
-    TRY(recursive_copy(get_application_data_path() / "templates" / configuration.type / configuration.kind, configuration.name));
+        for (auto const& inherited : *kind.inherits)
+        {
+            TRY(copy_files(get_application_data_path() / "templates" / configuration.type / inherited, configuration.name));
+            auto parent = *std::ranges::find(projectTemplate.kinds, inherited, &Kind::name);
+            if (parent.features.has_value())
+            {
+                for (auto const& feature : *parent.features)
+                    TRY(copy_feature_files(configuration, feature));
+            }
+            else
+            {
+                TRY(self(parent));
+            }
+        }
+
+        return {};
+    }(projectKind));
+
+    TRY(copy_files(get_application_data_path() / "templates" / configuration.type / configuration.kind, configuration.name));
 
     if (projectKind.features.has_value())
     {
-        TRY(recursive_copy_features(configuration, *projectKind.features));
+        for (auto const& feature : *projectKind.features)
+            TRY(copy_feature_files(configuration, feature));
     }
 
     return {};

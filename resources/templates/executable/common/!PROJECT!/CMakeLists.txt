@@ -23,26 +23,11 @@ target_compile_features(${PROJECT_NAME} PRIVATE c_std_!STANDARD!)
 %END
 
 %IF [<|ENV:FEATURES|> CONTAINS <installable>]:
-target_sources(${PROJECT_NAME} PUBLIC FILE_SET HEADERS BASE_DIRS include FILES ${!PROJECT!_HeaderFiles})
-
-export(TARGETS      ${PROJECT_NAME}
-       FILE         ${EXPORT_DIR}/${PROJECT_NAME}Targets.cmake
-       NAMESPACE    ${PROJECT_NAME}::
-)
-
 install(TARGETS     ${PROJECT_NAME}
-        EXPORT      ${PROJECT_NAME}Targets
-        ARCHIVE
-        FILE_SET HEADERS
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        RUNTIME
+        FILE_SET    ${CMAKE_BINARY_DIR}/${CMAKE_BUILD_TYPE}
+        DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
-
-install(EXPORT      ${PROJECT_NAME}Targets
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}/cmake
-        NAMESPACE   ${PROJECT_NAME}::
-)
-
-install(FILES ${PROJECT_SOURCE_DIR}/cmake/${PROJECT_NAME}Config.cmake DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}/cmake)
 %END
 
 target_link_options(${PROJECT_NAME} PRIVATE ${!PROJECT!_LinkerOptions})

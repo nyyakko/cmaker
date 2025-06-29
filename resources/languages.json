@@ -13,6 +13,11 @@
                                 {
                                     "name": "installable",
                                     "optional": true
+                                },
+                                {
+                                    "name": "metadata",
+                                    "optional": true,
+                                    "requiredFeatures": ["installable"]
                                 }
                             ]
                         },
