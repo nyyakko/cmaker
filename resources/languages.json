@@ -13,17 +13,19 @@
                                 {
                                     "name": "installable",
                                     "optional": true
-                                },
-                                {
-                                    "name": "freedesktop-metadata",
-                                    "optional": true,
-                                    "requires": ["installable"]
                                 }
                             ]
                         },
                         {
                             "name": "imgui",
-                            "inherits": ["common"]
+                            "inherits": ["common"],
+                            "features": [
+                                {
+                                    "name": "xdg-meta",
+                                    "optional": true,
+                                    "requires": ["installable"]
+                                }
+                            ]
                         }
                     ]
                 },

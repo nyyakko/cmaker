@@ -1,10 +1,10 @@
 import os
 import sys
-%IF [<|ENV:FEATURES|> CONTAINS <freedesktop-metadata>]:
+%IF [<|ENV:FEATURES|> CONTAINS <xdg-meta>]:
 import configparser
 %END
 
-%IF [<|ENV:FEATURES|> CONTAINS <freedesktop-metadata>]:
+%IF [<|ENV:FEATURES|> CONTAINS <xdg-meta>]:
 def configure_desktop_metadata(prefix):
     meta = configparser.ConfigParser()
     meta.optionxform = str
@@ -36,7 +36,7 @@ def main(arguments):
         prefix = arguments[0]
 
     os.system(f'cmake --install build --prefix {prefix}')
-%IF [<|ENV:FEATURES|> CONTAINS <freedesktop-metadata>]:
+%IF [<|ENV:FEATURES|> CONTAINS <xdg-meta>]:
     install_desktop_metadata(os.path.expanduser(prefix))
 %END
 

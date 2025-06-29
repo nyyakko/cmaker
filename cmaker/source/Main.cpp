@@ -104,25 +104,20 @@ liberror::Result<void> sanitize_argument_values(argparse::ArgumentParser const& 
         auto fnIsPresent = [&] {
             return fplus::is_elem_of(featureName, fplus::transform(std::bind_front(&Feature::name), *maybeTemplateKind->features));
         };
-
-        return (!maybeTemplateKind->features.has_value() || !fnIsPresent()) && ![&] (this auto&& self, Kind const& kind) -> bool {
+        return !((maybeTemplateKind->features.has_value() && fnIsPresent()) || [&] (this auto&& self, Kind const& kind) {
             if (!kind.inherits.has_value()) return false;
-
             auto isPresent = false;
-
             for (auto const& inheritName : *kind.inherits)
             {
                 if (isPresent) break;
-
                 auto const& inherit = *std::ranges::find(maybeTemplate->kinds, inheritName, &Kind::name);
                 if (inherit.features.has_value())
                     isPresent |= fplus::is_elem_of(featureName, fplus::transform(std::bind_front(&Feature::name), *inherit.features));
                 if (inherit.inherits.has_value())
                     isPresent |= self(inherit);
             }
-
             return isPresent;
-        }(*maybeTemplateKind);
+        }(*maybeTemplateKind));
     });
     if (maybeFeature != features.end())
     {
@@ -141,6 +136,35 @@ struct Configuration
     std::string kind;
     std::vector<std::string> features;
 };
+
+std::vector<std::string> collect_feature_required_features(Kind const& kind, std::string_view featureName)
+{
+    std::vector<std::string> requirez {};
+    if (!kind.features.has_value()) return requirez;
+
+    auto maybeFeature = std::ranges::find(*kind.features, featureName, &Feature::name);
+    if (maybeFeature != kind.features->end() && maybeFeature->requirez.has_value())
+    {
+        std::ranges::copy(*maybeFeature->requirez, std::back_inserter(requirez));
+    }
+
+    return requirez;
+}
+
+std::vector<std::string> collect_features(Kind const& kind)
+{
+    std::vector<std::string> features {};
+    if (!kind.features.has_value()) return features;
+
+    for (auto const& feature : fplus::drop_if(std::bind_front(&Feature::optional), *kind.features))
+    {
+        if (feature.requirez.has_value())
+            std::ranges::copy(*feature.requirez, std::back_inserter(features));
+        features.push_back(feature.name);
+    }
+
+    return features;
+}
 
 Configuration configure_project(argparse::ArgumentParser const& parser, std::vector<Language> const& languages)
 {
@@ -163,72 +187,25 @@ Configuration configure_project(argparse::ArgumentParser const& parser, std::vec
     auto projectTemplate = *std::ranges::find(projectLanguage.templates, configuration.type, &Template::name);
     auto projectKind = *std::ranges::find(projectTemplate.kinds, configuration.kind, &Kind::name);
 
-    auto fnCollectFeatureRequiredFeatures = [] (auto&& kind, auto&& featureName) {
-        std::vector<std::string> requirez {};
-        if (!kind.features.has_value()) return requirez;
-
-        auto maybeFeature = std::ranges::find(*kind.features, featureName, &Feature::name);
-        if (maybeFeature != kind.features->end() && maybeFeature->requirez.has_value())
-        {
-            std::ranges::copy(*maybeFeature->requirez, std::back_inserter(requirez));
-        }
-
-        return requirez;
-    };
-
-    auto fnCollectFeatureRequiredFeaturesRecursive = [&] (this auto&& self, auto&& kinds, auto&& kind, auto&& featureName) {
-        auto requirez = fnCollectFeatureRequiredFeatures(kind, featureName);
-        if (!kind.inherits.has_value()) return requirez;
-
-        for (auto const& inheritName : *kind.inherits)
-        {
-            auto const& inheritKind = *std::ranges::find(kinds, inheritName, &Kind::name);
-            std::ranges::copy(self(kinds, inheritKind, featureName), std::back_inserter(requirez));
-        }
-
-        return requirez;
-    };
-
     configuration.features = fplus::nub(fplus::transform_and_concat([&] (auto&& featureName) -> std::vector<std::string> {
         std::vector<std::string> requirez {};
-        std::ranges::copy(fnCollectFeatureRequiredFeaturesRecursive(projectTemplate.kinds, projectKind, featureName), std::back_inserter(requirez));
+        std::ranges::copy([&] (this auto&& self, Kind const& kind) {
+            auto requirez = collect_feature_required_features(kind, featureName);
+            if (!kind.inherits.has_value()) return requirez;
+            for (auto const& inheritName : *kind.inherits)
+            {
+                auto const& inheritKind = *std::ranges::find(projectTemplate.kinds, inheritName, &Kind::name);
+                std::ranges::copy(self(inheritKind), std::back_inserter(requirez));
+            }
+            return requirez;
+        }(projectKind), std::back_inserter(requirez));
         requirez.push_back(featureName);
         return requirez;
     }, configuration.features));
 
-    auto fnCollectFeatures = [] (auto&& kind) {
-        std::vector<std::string> features {};
-        if (!kind.features.has_value()) return features;
-
-        for (auto const& feature : fplus::drop_if(std::bind_front(&Feature::optional), *kind.features))
-        {
-            if (feature.requirez.has_value())
-            {
-                std::ranges::copy(*feature.requirez, std::back_inserter(features));
-            }
-
-            features.push_back(feature.name);
-        }
-
-        return features;
-    };
-
-    auto fnCollectFeaturesRecursive = [&] (this auto&& self, auto&& kinds, auto&& kind) {
-        auto features = fnCollectFeatures(kind);
-        if (!kind.inherits.has_value()) return features;
-
-        for (auto const& subInheritedName : *kind.inherits)
-        {
-            auto const& subInherited = *std::ranges::find(kinds, subInheritedName, &Kind::name);
-            std::ranges::copy(self(kinds, subInherited), std::back_inserter(features));
-        }
-
-        return features;
-    };
-
     if (projectKind.features.has_value())
     {
-        auto features = fplus::nub(fnCollectFeatures(projectKind));
+        auto features = fplus::nub(collect_features(projectKind));
         features = fplus::drop_if([&] (auto&& feature) { return fplus::is_elem_of(feature, configuration.features); }, features);
         configuration.features.insert(configuration.features.end(), features.begin(), features.end());
     }
@@ -237,7 +214,16 @@ Configuration configure_project(argparse::ArgumentParser const& parser, std::vec
     {
         auto inheritedFeatures = fplus::nub(fplus::transform_and_concat([&] (std::string const& inheritedName) {
             Kind const& inherited = *std::ranges::find(projectTemplate.kinds, inheritedName, &Kind::name);
-            return fnCollectFeaturesRecursive(projectTemplate.kinds, inherited);
+            return [&] (this auto&& self, Kind const& kind) {
+                auto features = collect_features(kind);
+                if (!kind.inherits.has_value()) return features;
+                for (auto const& subInheritedName : *kind.inherits)
+                {
+                    auto const& subInherited = *std::ranges::find(projectTemplate.kinds, subInheritedName, &Kind::name);
+                    std::ranges::copy(self(subInherited), std::back_inserter(features));
+                }
+                return features;
+            }(inherited);
         }, *projectKind.inherits));
 
         inheritedFeatures = fplus::drop_if([&] (auto&& feature) { return fplus::is_elem_of(feature, configuration.features); }, inheritedFeatures);
